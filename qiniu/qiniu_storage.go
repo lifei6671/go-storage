@@ -22,9 +22,32 @@ type QiniuStorage struct {
 	bucketManager *qstorage.BucketManager
 }
 
-func NewQiniuStorage(accessKey string,secretKey string,cfg qstorage.Config) *QiniuStorage  {
+func NewQiniuStorage(accessKey string,secretKey string,ctx storage.Context) *QiniuStorage  {
 
 	mac := qbox.NewMac(accessKey, secretKey)
+
+	cfg := qstorage.Config{}
+
+	if z,ok := ctx.Get("Zone"); ok {
+		if zz,ok := z.(qstorage.Zone); ok {
+			cfg.Zone = &zz
+		}
+	}
+	if z,ok := ctx.Get("UseHTTPS"); ok {
+		if zz,ok := z.(bool); ok {
+			cfg.UseHTTPS = zz
+		}
+	}
+	if z,ok := ctx.Get("UseCdnDomains"); ok {
+		if zz,ok := z.(bool); ok {
+			cfg.UseCdnDomains = zz
+		}
+	}
+	if z,ok := ctx.Get("CentralRsHost"); ok {
+		if zz,ok := z.(string); ok {
+			cfg.CentralRsHost = zz
+		}
+	}
 
 	bucketManager := qstorage.NewBucketManager(mac, &cfg)
 
