@@ -103,7 +103,7 @@ func TestBucket_NewTypedWriter2(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b,err := ioutil.ReadFile("/Users/minho/OneDrive/图片/006pdpXYly1flasoa1xgmj31ww2gh4qs.jpg")
+	b,err := ioutil.ReadFile("E:/OneDrive/图片/006pdpXYly1flasoa1xgmj31ww2gh4qs.jpg")
 
 	if err != nil {
 		t.Fatal(err)

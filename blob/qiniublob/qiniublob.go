@@ -17,6 +17,8 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"bytes"
+	"bufio"
+	"sync"
 )
 
 var emptyBody = ioutil.NopCloser(strings.NewReader(""))
@@ -148,9 +150,8 @@ func OpenBucket( accessKey string, secretKey string, cfg storage.Config, scope s
 }
 
 type writer struct {
-	toggle      *blob.Toggle
+	once      	*sync.Once
 	w 			*io.PipeWriter
-	r 			*io.PipeReader
 	isFirst		bool
 	bucket      string
 	f           *os.File
@@ -165,6 +166,7 @@ type writer struct {
 	upToken     string
 	ret         *storage.BlkputRet
 	err         error
+	donec       chan struct{} // closed when done writing
 }
 
 func (w *writer) Write(p []byte) (int, error) {
@@ -172,55 +174,106 @@ func (w *writer) Write(p []byte) (int, error) {
 	if w.bufferSize > 0 {
 		dataLength := len(p)
 		var err error
-		w.toggle.Do(func() {
-			pr,pw := io.Pipe()
-			w.w = pw
-			w.r = pr
-			w.w.Write(p)
-
-			scheme := "http://"
-			if w.cfg.UseHTTPS {
-				scheme = "https://"
-			}
-
-			host := w.cfg.Zone.SrcUpHosts[0]
-			if w.cfg.UseCdnDomains {
-				host = w.cfg.Zone.CdnUpHosts[0]
-			}
-			upHost := fmt.Sprintf("%s%s", scheme, host)
-			w.upHost = upHost
-			var ret storage.BlkputRet
-
-
-			err = w.uploader.Mkblk(w.ctx, w.upToken, upHost, &ret, w.bufferSize, bytes.NewReader(p), -1)
-
-		}, func() {
-			ret := storage.BlkputRet{}
-			w.size += int64(dataLength)
-			err = w.uploader.Bput(w.ctx, w.upToken, &ret, bytes.NewReader(p), dataLength)
-		})
-
+		//w.toggle.Do(func() {
+		//
+		//	scheme := "http://"
+		//	if w.cfg.UseHTTPS {
+		//		scheme = "https://"
+		//	}
+		//
+		//	host := w.cfg.Zone.SrcUpHosts[0]
+		//	if w.cfg.UseCdnDomains {
+		//		host = w.cfg.Zone.CdnUpHosts[0]
+		//	}
+		//	upHost := fmt.Sprintf("%s%s", scheme, host)
+		//	w.upHost = upHost
+		//
+		//	r := bufio.NewReaderSize(bytes.NewReader(make([]byte, 0)),w.bufferSize)
+		//	wr := bufio.NewWriter(bytes.NewBuffer(make([]byte, 0)))
+		//
+		//	w.rw = bufio.NewReadWriter(r,wr)
+		//
+		//	_,err = w.rw.Write(p)
+		//
+		//
+		//	//var ret storage.BlkputRet
+		//	//
+		//	//
+		//	//
+		//	//err = w.uploader.Mkblk(w.ctx, w.upToken, upHost, &ret, w.bufferSize, bytes.NewReader(p), -1)
+		//
+		//}, func() {
+		//	//ret := storage.BlkputRet{}
+		//	//w.size += int64(dataLength)
+		//	//err = w.uploader.Bput(w.ctx, w.upToken, &ret, bytes.NewReader(p), dataLength)
+		//})
+		_,err = w.Write(p)
 		return dataLength,err
 	} else {
 		l := 0
 		var err error
-		w.toggle.Do(func() {
+		w.once.Do(func() {
 			f, e := ioutil.TempFile(os.TempDir(), "qiniu")
 			if e != nil {
 				err = e
 			} else {
 				w.f = f
 			}
-		}, func() {
-			l,err = w.f.Write(p)
 		})
 
 		if w.err != nil {
 			return 0, w.err
 		}
 
+		l,err = w.f.Write(p)
+
 		return l, nil
 	}
+}
+
+func (w *writer) open() error {
+
+	scheme := "http://"
+	if w.cfg.UseHTTPS {
+		scheme = "https://"
+	}
+
+	host := w.cfg.Zone.SrcUpHosts[0]
+	if w.cfg.UseCdnDomains {
+		host = w.cfg.Zone.CdnUpHosts[0]
+	}
+	upHost := fmt.Sprintf("%s%s", scheme, host)
+	w.upHost = upHost
+
+	pr, pw := io.Pipe()
+	w.w = pw
+
+	go func() {
+		defer close(w.donec)
+
+		w.once.Do(func() {
+				scheme := "http://"
+				if w.cfg.UseHTTPS {
+					scheme = "https://"
+				}
+
+				host := w.cfg.Zone.SrcUpHosts[0]
+				if w.cfg.UseCdnDomains {
+					host = w.cfg.Zone.CdnUpHosts[0]
+				}
+				upHost := fmt.Sprintf("%s%s", scheme, host)
+				w.upHost = upHost
+
+			//ret := storage.BlkputRet{}
+
+			//buf := make([]byte,w.bufferSize)
+			//
+			//
+			//err := w.uploader.Mkblk(w.ctx, w.upToken, upHost, &ret, w.bufferSize, bytes.NewReader(p), -1)
+		})
+	}()
+
+	return nil
 }
 
 func (w *writer) Close() error {
@@ -247,7 +300,7 @@ func (w *writer) Close() error {
 		return nil
 	}
 	if w.bufferSize > 0 {
-		w.err = w.uploader.Mkfile(w.ctx, w.upToken, w.upHost, &ret, w.key, false, w.size, nil)
+		//w.err = w.uploader.Mkfile(w.ctx, w.upToken, w.upHost, &ret, w.key, false, w.size, nil)
 	}
 	return w.err
 }
